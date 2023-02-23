@@ -73,3 +73,60 @@ resource "aws_route_table_association" "aws_private_route_table_association" {
   subnet_id      = aws_subnet.private_subnet[count.index].id
   route_table_id = aws_route_table.private_route_table.id
 }
+
+resource "aws_security_group" "app_security_group" {
+  name_prefix = "app_security_group"
+
+  vpc_id = aws_vpc.vpc.id
+
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # Add ingress rule for the port your application runs on
+  ingress {
+    from_port   = 3000
+    to_port     = 3000
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+# Launch the EC2 instance
+resource "aws_instance" "example_instance" {
+  ami                         = var.ami_id
+  instance_type               = "t2.micro"
+  subnet_id                   = aws_subnet.public_subnet[0].id
+  vpc_security_group_ids      = [aws_security_group.app_security_group.id]
+  associate_public_ip_address = true
+  root_block_device {
+    volume_type           = "gp2"
+    volume_size           = 50
+    delete_on_termination = true
+  }
+  # Disable termination protection
+  disable_api_termination = false
+}
