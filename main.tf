@@ -1,3 +1,4 @@
+
 resource "aws_vpc" "vpc" {
   cidr_block = var.cidr_block
   tags = {
@@ -127,6 +128,147 @@ resource "aws_instance" "example_instance" {
     volume_size           = 50
     delete_on_termination = true
   }
+  iam_instance_profile = aws_iam_instance_profile.profile.name
+  user_data = <<EOF
+		#! /bin/bash
+  echo DB_HOST=${aws_db_instance.db_instance.address} >> /etc/environment
+  echo DB_USER=${aws_db_instance.db_instance.username} >> /etc/environment
+  echo DB_PASSWORD=${aws_db_instance.db_instance.password} >> /etc/environment
+  echo DB_NAME=${aws_db_instance.db_instance.db_name} >> /etc/environment
+  echo NODE_PORT="3000" >> /etc/environment
+  echo DB_PORT=${var.db_port} >> /etc/environment
+  echo S3_BUCKET_NAME=${aws_s3_bucket.private_bucket.bucket} >> /etc/environment
+  sudo systemctl daemon-reload
+  sudo systemctl restart nodeapp
+	EOF
+
+
   # Disable termination protection
   disable_api_termination = false
+}
+
+# database security group
+  resource "aws_security_group" "database_security_group" {
+   name        = "database-security-group"
+   description = "enable mysql/aurora access on port 3306"
+   vpc_id      = aws_vpc.vpc.id
+
+   ingress {
+    description     = "mysql/aurora access"
+    from_port       = 3306
+    to_port         = 3306
+    protocol        = "tcp"
+    security_groups = [aws_security_group.app_security_group.id]
+  }
+
+  tags = {
+    Name = "database security group"
+  }
+}
+
+resource "aws_db_subnet_group" "private_subnet" {
+  subnet_ids = aws_subnet.private_subnet[*].id
+  name       = "database"
+}
+
+# create the rds instance
+resource "aws_db_instance" "db_instance" {
+  engine                 = "mysql"
+  engine_version         = "8.0.31"
+  multi_az               = "false"
+  identifier             = "csye6225"
+  username               = "csye6225"
+  password               = "Prakhya123"//var.db_password
+  instance_class         = "db.t3.micro"
+  allocated_storage      = 10
+  db_subnet_group_name   = aws_db_subnet_group.private_subnet.name
+  vpc_security_group_ids = [aws_security_group.database_security_group.id]
+  db_name                = "csye6225"
+  skip_final_snapshot    = "true"
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "s3" {
+  bucket = aws_s3_bucket.private_bucket.id
+
+  rule {
+    id     = "transition-to-standard-ia"
+    status = "Enabled"
+    transition {
+      days          = 30
+      storage_class = "STANDARD_IA"
+    }
+  }
+}
+
+resource "aws_s3_bucket" "private_bucket" {
+  bucket        = "private-bucket-${var.environment}-${random_id.random_bucket_suffix.hex}"
+  acl           = "private"
+  force_destroy = true
+
+  server_side_encryption_configuration {
+    rule {
+      apply_server_side_encryption_by_default {
+        sse_algorithm = "AES256"
+      }
+    }
+  }
+}
+
+resource "random_id" "random_bucket_suffix" {
+  byte_length = 4
+}
+
+variable "environment" {}
+
+resource "aws_iam_policy" "webapp_s3_policy" {
+  name        = "WebAppS3"
+  description = "Allows EC2 instances to perform S3 actions"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = [
+          "s3:*"
+        ]
+        Effect = "Allow"
+        Resource = [
+          "arn:aws:s3:::${aws_s3_bucket.private_bucket.bucket}",
+          "arn:aws:s3:::${aws_s3_bucket.private_bucket.bucket}/*"
+        ]
+      }
+    ]
+  })
+}
+
+resource "aws_db_parameter_group" "db" {
+  name_prefix = "db-"
+  family      = "mysql8.0"
+  description = "Parameter group for MySQL 8.0"
+}
+resource "aws_iam_role" "ec2_csye6225_role" {
+  name = "EC2-CSYE6225"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "webapp_s3_policy_attachment" {
+  policy_arn = aws_iam_policy.webapp_s3_policy.arn
+  role       = aws_iam_role.ec2_csye6225_role.name
+}
+
+resource "aws_iam_instance_profile" "profile" {
+  name = "profile"
+  role = aws_iam_role.ec2_csye6225_role.name
 }

@@ -47,3 +47,8 @@ variable "ami_id" {
   //default = ""
   description = "The AMI used for instance"
 }
+variable "db_port" {
+  type        = number
+  description = "The port to use for the database"
+  default     = 3306
+}
