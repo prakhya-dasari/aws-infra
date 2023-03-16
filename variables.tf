@@ -1,7 +1,7 @@
 variable "region" {
   type        = string
   description = "The region in which to create the infrastructure."
-  default     = "us-east-1"
+
 }
 
 variable "cidr_block" {
@@ -38,8 +38,8 @@ variable "vpc_id" {
 }
 
 variable "profile" {
-  type    = string
-  default = "demo"
+  type = string
+  //default = "dev"
 }
 
 variable "ami_id" {
@@ -51,4 +51,35 @@ variable "db_port" {
   type        = number
   description = "The port to use for the database"
   default     = 3306
+}
+
+variable "db_username" {
+  type        = string
+  description = "Database Username "
+}
+
+variable "db_password" {
+  type        = string
+  description = "Database Password "
+}
+variable "DB_NAME" {
+  type        = string
+  description = "Database Name "
+}
+variable "server_port" {
+  type        = number
+  description = "Port for Webapp "
+}
+variable "environment" {
+  type        = string
+  description = "bucket env"
+}
+variable "hosted_zone_id" {
+  type        = string
+  description = "zone id"
+
+}
+variable "domain_name" {
+  type        = string
+  description = "domain name"
 }
