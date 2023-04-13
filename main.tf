@@ -130,7 +130,10 @@ resource "aws_db_subnet_group" "private_subnet" {
   subnet_ids = aws_subnet.private_subnet[*].id
   name       = "database"
 }
-
+resource "aws_kms_key" "b" {
+  description             = "RDS key 1"
+  deletion_window_in_days = 10
+}
 # create the rds instance
 resource "aws_db_instance" "db_instance" {
   engine                 = "mysql"
@@ -146,6 +149,8 @@ resource "aws_db_instance" "db_instance" {
   parameter_group_name   = aws_db_parameter_group.db.name
   db_name                = var.DB_NAME
   skip_final_snapshot    = "true"
+  storage_encrypted      = "true"
+  kms_key_id             = aws_kms_key.b.arn
 }
 
 resource "aws_s3_bucket_lifecycle_configuration" "s3" {
@@ -278,12 +283,12 @@ resource "aws_security_group" "load_balancer_security_group" {
   name        = "load_balancer_security_group"
   description = "Security group for the load balancer"
   vpc_id      = aws_vpc.vpc.id
-  ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+  # ingress {
+  #   from_port   = 80
+  #   to_port     = 80
+  #   protocol    = "tcp"
+  #   cidr_blocks = ["0.0.0.0/0"]
+  # }
 
   ingress {
     from_port   = 443
@@ -336,8 +341,9 @@ resource "aws_lb" "webapp_lb" {
 
 resource "aws_lb_listener" "listener" {
   load_balancer_arn = aws_lb.webapp_lb.arn
-  port              = "80"
-  protocol          = "HTTP"
+  port              = "443"
+  protocol          = "HTTPS"
+  certificate_arn   = "arn:aws:acm:us-east-1:777316955194:certificate/0fc133b4-5bac-4689-982c-44fe76b22217"
 
   default_action {
     target_group_arn = aws_lb_target_group.target_group.arn
@@ -359,6 +365,61 @@ locals {
   sudo systemctl restart nodeapp
 	EOF
 }
+resource "aws_kms_key" "a" {
+  description             = "EBS key 1"
+  deletion_window_in_days = 10
+}
+resource "aws_kms_key_policy" "example" {
+  key_id = aws_kms_key.a.id
+  policy = jsonencode({
+    Id = "key-consolepolicy-1"
+    Statement = [
+      {
+        Sid    = "Enable IAM User Permissions",
+        Effect = "Allow",
+        Principal = {
+          "AWS" : "arn:aws:iam::777316955194:root"
+        },
+        Action   = "kms:*",
+        Resource = "*"
+      },
+      {
+        Sid    = "Allow use of the key",
+        Effect = "Allow",
+        Principal = {
+          "AWS" : "arn:aws:iam::777316955194:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling"
+        },
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ],
+        Resource = "*"
+      },
+      {
+        Sid    = "Allow attachment of persistent resources",
+        Effect = "Allow",
+        Principal = {
+          "AWS" : "arn:aws:iam::777316955194:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling"
+        },
+        Action = [
+          "kms:CreateGrant",
+          "kms:ListGrants",
+          "kms:RevokeGrant"
+        ],
+        Resource = "*",
+        Condition = {
+          Bool = {
+            "kms:GrantIsForAWSResource" : "true"
+          }
+        }
+      }
+    ]
+    Version = "2012-10-17"
+  })
+}
 
 # Create a launch template
 resource "aws_launch_template" "webapp_launch_template" {
@@ -366,6 +427,7 @@ resource "aws_launch_template" "webapp_launch_template" {
   image_id      = var.ami_id
   instance_type = "t2.micro"
   key_name      = "ssh"
+  # here
   network_interfaces {
     associate_public_ip_address = true
     security_groups             = [aws_security_group.app_security_group.id]
@@ -376,8 +438,23 @@ resource "aws_launch_template" "webapp_launch_template" {
       volume_size           = 50
       volume_type           = "gp2"
       delete_on_termination = true
+      //here changee
+      encrypted  = "true"
+      kms_key_id = aws_kms_key.a.arn
     }
   }
+  # network_interfaces {
+  #   associate_public_ip_address = true
+  #   security_groups             = [aws_security_group.app_security_group.id]
+  # }
+  # block_device_mappings {
+  #   device_name = "/dev/xvda"
+  #   ebs {
+  #     volume_size           = 50
+  #     volume_type           = "gp2"
+  #     delete_on_termination = true
+  #   }
+  # }
   user_data = base64encode(local.user_data_ec2)
 
   iam_instance_profile {
